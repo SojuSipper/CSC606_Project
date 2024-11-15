@@ -56,19 +56,19 @@ def process_nc_file(file_path, output_dir, time_step=0, component_index=0):
 def select_random_files(root_dir, category):
     """
     Select 50% of the available .nc files from a given category ('Test' or 'Train')
-    within subdirectories labeled '2022'.
+    within subdirectories labeled '2013'.
     """
     files_list = []
     
-    # Walk through the directory to find .nc files in '2022' folders
+    # Walk through the directory to find .nc files in 'YEAR' folders
     for subdir, _, files in os.walk(root_dir):
-        if category in subdir and '2022' in subdir:
+        if category in subdir and '2013' in subdir: #change the '___' to whatever year you need to get info from
             for file in files:
                 if file.endswith('.nc'):
                     files_list.append(os.path.join(subdir, file))
     
-    # Randomly select 50% of the files
-    selected_count = max(1, len(files_list) // 2)
+    # Randomly select 10% of the files
+    selected_count = max(1, len(files_list) // 10)
     print(f"Selecting {selected_count} files out of {len(files_list)} for category '{category}'")
     selected_files = random.sample(files_list, selected_count) if files_list else []
     
@@ -76,10 +76,10 @@ def select_random_files(root_dir, category):
 
 def process_directory(root_dir):
     """
-    Process the Test and Train datasets by randomly selecting 50% of files 
-    from the '2022' subdirectories and converting them to images.
+    Process the Test and Train datasets by randomly selecting 10% of files 
+    from the '2013' subdirectories and converting them to images.
     """
-    # Select 50% of random files from Test/2022 and Train/2022
+    # Select 10% of random files from Test/YEAR and Train/YEAR
     test_files = select_random_files(root_dir, 'Test')
     train_files = select_random_files(root_dir, 'Train')
     
