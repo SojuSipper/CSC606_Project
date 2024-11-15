@@ -3,8 +3,8 @@ import io
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers, models
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
 import os
+import datetime
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
@@ -42,39 +42,89 @@ def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epoc
             tf.TensorSpec(shape=(image_size[0], image_size[1], 3), dtype=tf.float32),
             tf.TensorSpec(shape=(), dtype=tf.float32)
         )
-    ).batch(batch_size)
+    ).batch(batch_size).repeat()
 
     test_dataset = tf.data.Dataset.from_generator(
         lambda: preprocess_images(test_images, test_labels),
-        output_signature=(
+        output_signature=( 
             tf.TensorSpec(shape=(image_size[0], image_size[1], 3), dtype=tf.float32),
             tf.TensorSpec(shape=(), dtype=tf.float32)
         )
-    ).batch(batch_size)
+    ).batch(batch_size).repeat()
+
+    # Calculate steps per epoch
+    steps_per_epoch = len(train_images) // batch_size
+    validation_steps = len(test_images) // batch_size
 
     # Define the model
-    model = models.Sequential([
-        layers.Conv2D(64, (3, 3), activation='relu', input_shape=image_size + (3,)),
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(128, (3, 3), activation='relu'),
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(256, (3, 3), activation='relu'),
-        layers.MaxPooling2D((2, 2)),
+    model = models.Sequential([ 
+        # Block 1
+        layers.Conv2D(64, (3, 3), activation='relu', padding='same', input_shape=image_size + (3,)),
+        layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
+        layers.MaxPooling2D((2, 2), strides=(2, 2)),
+
+        # Block 2
+        layers.Conv2D(128, (3, 3), activation='relu', padding='same'),
+        layers.Conv2D(128, (3, 3), activation='relu', padding='same'),
+        layers.MaxPooling2D((2, 2), strides=(2, 2)),
+
+        # Block 3
+        layers.Conv2D(256, (3, 3), activation='relu', padding='same'),
+        layers.Conv2D(256, (3, 3), activation='relu', padding='same'),
+        layers.Conv2D(256, (3, 3), activation='relu', padding='same'),
+        layers.MaxPooling2D((2, 2), strides=(2, 2)),
+
+        # Block 4
+        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
+        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
+        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
+        layers.MaxPooling2D((2, 2), strides=(2, 2)),
+
+        # Block 5
+        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
+        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
+        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
+        layers.MaxPooling2D((2, 2), strides=(2, 2)),
+
+        # Fully connected layers
         layers.Flatten(),
-        layers.Dense(512, activation='relu'),
-        layers.Dense(256, activation='relu'),
-        layers.Dense(10, activation='softmax')  # Example: 10 classes
+        layers.Dense(4096, activation='relu'),
+        layers.Dropout(0.5),
+        layers.Dense(4096, activation='relu'),
+        layers.Dropout(0.5),
+        layers.Dense(10, activation='softmax')  # Replace 10 with the number of your classes
     ])
 
-    # Compile the model
-    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    # Set an initial low learning rate for Adam optimizer
+    initial_learning_rate = 0.001  # You can adjust this value
 
-    # Train the model with verbose=1 for standard logs (loss, accuracy, etc.)
+    # Create a learning rate scheduler to decrease the learning rate over time
+    lr_scheduler = tf.keras.callbacks.LearningRateScheduler(
+        lambda epoch: initial_learning_rate * (0.9 ** epoch),  # Decreases LR by 10% every epoch
+        verbose=1
+    )
+
+    # Compile the model with the Adam optimizer and the adjusted learning rate
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=initial_learning_rate),
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    # TensorBoard log directory
+    log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1, profile_batch='10,20')
+
+    # Model Summary
+    model.summary()
+
+    # Train the model with TensorBoard and LearningRateScheduler callback
     history = model.fit(
         train_dataset,
         validation_data=test_dataset,
         epochs=epochs,
-        verbose=1  # Enable verbose training logs
+        steps_per_epoch=steps_per_epoch,
+        validation_steps=validation_steps,
+        callbacks=[tensorboard_callback, lr_scheduler],
+        verbose=1  # Simplified output to avoid odd formatting
     )
 
     return model
@@ -83,4 +133,4 @@ def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epoc
 train_dir = 'Tornet_Dataset_Images/Train'  # Replace with the correct directory
 test_dir = 'Tornet_Dataset_Images/Test'    # Replace with the correct directory
 
-trained_model = vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=4, epochs=2)
+trained_model = vgg16_custom(train_dir, test_dir, image_size=(112, 112), batch_size=16, epochs=4)
