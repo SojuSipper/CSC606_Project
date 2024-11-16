@@ -82,7 +82,7 @@ def process_nc_file(file_path, base_output_dir, time_step=0, component_index=0):
         #plt.title(f'WIDTH - Label: {label_str}')
         #plt.xlabel("X-axis")
         #plt.ylabel("Y-axis")
-        plt.savefig(output_path, bbox_inches='tight', dpi=450)
+        plt.savefig(output_path, bbox_inches='tight', dpi=600)
         plt.close()
         
         print(f"Saved image: {output_path}")

@@ -5,11 +5,12 @@ import tensorflow as tf
 from tensorflow.keras import layers, models
 import os
 import datetime
+import psutil
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epochs=10,
-                 initial_learning_rate=0.001, dropout_rate=0.5, optimizer_type='adam', lr_decay_factor=0.9):
+def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epochs=20,
+                 initial_learning_rate=0.01, dropout_rate=0.65, optimizer_type='adam', lr_decay_factor=0.95):
     # Verify TensorFlow GPU availability
     physical_devices = tf.config.list_physical_devices('GPU')
     if physical_devices:
@@ -37,12 +38,20 @@ def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epoc
         shuffle=False
     )
 
+
     # Get the number of classes from the training dataset
     num_classes = len(train_dataset.class_names)
     print(f"Detected {num_classes} classes: {train_dataset.class_names}")
 
     # Preprocessing: Normalizing the pixel values
     normalization_layer = layers.Rescaling(1./255)
+
+
+    data_augmentation = tf.keras.Sequential([
+    layers.RandomFlip("horizontal"),
+    layers.RandomRotation(0.1),
+    layers.RandomZoom(0.1)
+    ])
 
     # Prepare datasets for better performance
     AUTOTUNE = tf.data.AUTOTUNE
@@ -51,6 +60,7 @@ def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epoc
 
     # Define the model (VGG16-like architecture)
     model = models.Sequential([
+        data_augmentation,
         normalization_layer,
         # Block 1
         layers.Conv2D(64, (3, 3), activation='relu', padding='same', input_shape=image_size + (3,)),
@@ -133,5 +143,20 @@ def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epoc
 train_dir = 'Tornet_Dataset_Images/Train'
 test_dir = 'Tornet_Dataset_Images/Test'
 
+
+# LIMITS CPU USSAGE TO PREVENT BLUESCREENING, HAS BEEN HAPPENING TO ME :^)
+
+# Limit TensorFlow threads
+os.environ["OMP_NUM_THREADS"] = "12"
+os.environ["TF_NUM_INTRAOP_THREADS"] = "12"
+os.environ["TF_NUM_INTEROP_THREADS"] = "4"
+
+# Set CPU affinity
+p = psutil.Process()
+p.cpu_affinity([1, 2, 3, 4, 5, 6, 7, 8])  # use P Cores (for an i9 12900k - my CPU)
+
+# Reduce TensorFlow process priority
+p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+
 # Train the model
-trained_model = vgg16_custom(train_dir, test_dir, image_size=(112, 112), batch_size=16, epochs=4)
+trained_model = vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epochs=20)
