@@ -8,7 +8,8 @@ import datetime
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epochs=10):
+def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epochs=10,
+                 initial_learning_rate=0.001, dropout_rate=0.5, optimizer_type='adam', lr_decay_factor=0.9):
     # Verify TensorFlow GPU availability
     physical_devices = tf.config.list_physical_devices('GPU')
     if physical_devices:
@@ -17,120 +18,120 @@ def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epoc
     else:
         print("No GPU found. Using CPU.")
 
-    # Load file paths for train and test data
-    train_images = [os.path.join(train_dir, f) for f in os.listdir(train_dir) if f.endswith(('.jpg', '.png'))]
-    test_images = [os.path.join(test_dir, f) for f in os.listdir(test_dir) if f.endswith(('.jpg', '.png'))]
+    # Load training and validation datasets from the directory
+    train_dataset = tf.keras.preprocessing.image_dataset_from_directory(
+        train_dir,
+        labels='inferred',
+        label_mode='int',
+        batch_size=batch_size,
+        image_size=image_size,
+        shuffle=True
+    )
 
-    # Debugging: Check file counts
-    print(f"Found {len(train_images)} training images and {len(test_images)} testing images.")
+    test_dataset = tf.keras.preprocessing.image_dataset_from_directory(
+        test_dir,
+        labels='inferred',
+        label_mode='int',
+        batch_size=batch_size,
+        image_size=image_size,
+        shuffle=False
+    )
 
-    # Generate dummy labels for demonstration (replace with actual labels)
-    train_labels = np.zeros(len(train_images))  # Replace with actual class indices
-    test_labels = np.zeros(len(test_images))   # Replace with actual class indices
+    # Get the number of classes from the training dataset
+    num_classes = len(train_dataset.class_names)
+    print(f"Detected {num_classes} classes: {train_dataset.class_names}")
 
-    # Preprocessing function to dynamically load images
-    def preprocess_images(image_paths, labels):
-        for path, label in zip(image_paths, labels):
-            img = tf.keras.preprocessing.image.load_img(path, target_size=image_size)
-            img_array = tf.keras.preprocessing.image.img_to_array(img) / 255.0  # Normalize
-            yield img_array, label
+    # Preprocessing: Normalizing the pixel values
+    normalization_layer = layers.Rescaling(1./255)
 
-    # Create TensorFlow datasets for dynamic loading
-    train_dataset = tf.data.Dataset.from_generator(
-        lambda: preprocess_images(train_images, train_labels),
-        output_signature=(
-            tf.TensorSpec(shape=(image_size[0], image_size[1], 3), dtype=tf.float32),
-            tf.TensorSpec(shape=(), dtype=tf.float32)
-        )
-    ).batch(batch_size).repeat()
+    # Prepare datasets for better performance
+    AUTOTUNE = tf.data.AUTOTUNE
+    train_dataset = train_dataset.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
+    test_dataset = test_dataset.cache().prefetch(buffer_size=AUTOTUNE)
 
-    test_dataset = tf.data.Dataset.from_generator(
-        lambda: preprocess_images(test_images, test_labels),
-        output_signature=( 
-            tf.TensorSpec(shape=(image_size[0], image_size[1], 3), dtype=tf.float32),
-            tf.TensorSpec(shape=(), dtype=tf.float32)
-        )
-    ).batch(batch_size).repeat()
-
-    # Calculate steps per epoch
-    steps_per_epoch = len(train_images) // batch_size
-    validation_steps = len(test_images) // batch_size
-
-    # Define the model
-    model = models.Sequential([ 
+    # Define the model (VGG16-like architecture)
+    model = models.Sequential([
+        normalization_layer,
         # Block 1
         layers.Conv2D(64, (3, 3), activation='relu', padding='same', input_shape=image_size + (3,)),
         layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
-        layers.MaxPooling2D((2, 2), strides=(2, 2)),
+        layers.MaxPooling2D((2, 2)),
 
         # Block 2
         layers.Conv2D(128, (3, 3), activation='relu', padding='same'),
         layers.Conv2D(128, (3, 3), activation='relu', padding='same'),
-        layers.MaxPooling2D((2, 2), strides=(2, 2)),
+        layers.MaxPooling2D((2, 2)),
 
         # Block 3
         layers.Conv2D(256, (3, 3), activation='relu', padding='same'),
         layers.Conv2D(256, (3, 3), activation='relu', padding='same'),
         layers.Conv2D(256, (3, 3), activation='relu', padding='same'),
-        layers.MaxPooling2D((2, 2), strides=(2, 2)),
+        layers.MaxPooling2D((2, 2)),
 
         # Block 4
         layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
         layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
         layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
-        layers.MaxPooling2D((2, 2), strides=(2, 2)),
+        layers.MaxPooling2D((2, 2)),
 
         # Block 5
         layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
         layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
         layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
-        layers.MaxPooling2D((2, 2), strides=(2, 2)),
+        layers.MaxPooling2D((2, 2)),
 
         # Fully connected layers
         layers.Flatten(),
         layers.Dense(4096, activation='relu'),
-        layers.Dropout(0.5),
+        layers.Dropout(dropout_rate),
         layers.Dense(4096, activation='relu'),
-        layers.Dropout(0.5),
-        layers.Dense(10, activation='softmax')  # Replace 10 with the number of your classes
+        layers.Dropout(dropout_rate),
+        layers.Dense(num_classes, activation='softmax')
     ])
 
-    # Set an initial low learning rate for Adam optimizer
-    initial_learning_rate = 0.001  # You can adjust this value
+    # Build the model to initialize its input shape
+    model.build(input_shape=(None, image_size[0], image_size[1], 3))
 
-    # Create a learning rate scheduler to decrease the learning rate over time
+    # Choose optimizer
+    if optimizer_type.lower() == 'adam':
+        optimizer = tf.keras.optimizers.Adam(learning_rate=initial_learning_rate)
+    elif optimizer_type.lower() == 'sgd':
+        optimizer = tf.keras.optimizers.SGD(learning_rate=initial_learning_rate, momentum=0.9)
+    else:
+        raise ValueError(f"Unsupported optimizer type: {optimizer_type}")
+
+    # Learning rate scheduler
     lr_scheduler = tf.keras.callbacks.LearningRateScheduler(
-        lambda epoch: initial_learning_rate * (0.9 ** epoch),  # Decreases LR by 10% every epoch
+        lambda epoch: initial_learning_rate * (lr_decay_factor ** epoch),
         verbose=1
     )
 
-    # Compile the model with the Adam optimizer and the adjusted learning rate
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=initial_learning_rate),
+    # Compile the model
+    model.compile(optimizer=optimizer,
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
 
     # TensorBoard log directory
     log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1, profile_batch='10,20')
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 
-    # Model Summary
+    # Model summary
     model.summary()
 
-    # Train the model with TensorBoard and LearningRateScheduler callback
+    # Train the model
     history = model.fit(
         train_dataset,
         validation_data=test_dataset,
         epochs=epochs,
-        steps_per_epoch=steps_per_epoch,
-        validation_steps=validation_steps,
         callbacks=[tensorboard_callback, lr_scheduler],
-        verbose=1  # Simplified output to avoid odd formatting
+        verbose=1
     )
 
     return model
 
-# Example usage:
-train_dir = 'Tornet_Dataset_Images/Train'  # Replace with the correct directory
-test_dir = 'Tornet_Dataset_Images/Test'    # Replace with the correct directory
+# Define the directories
+train_dir = 'Tornet_Dataset_Images/Train'
+test_dir = 'Tornet_Dataset_Images/Test'
 
+# Train the model
 trained_model = vgg16_custom(train_dir, test_dir, image_size=(112, 112), batch_size=16, epochs=4)
