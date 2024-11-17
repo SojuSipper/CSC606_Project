@@ -15,7 +15,7 @@ def display_frame_labels(file_path):
         # Check if 'frame_labels' is present in the variables
         if 'frame_labels' in nc_data.variables:
             frame_labels = nc_data.variables['frame_labels'][:]
-            print(f"Frame labels in {file_path}: {frame_labels}")
+            print(f"{frame_labels}")
             return frame_labels
         else:
             print(f"'frame_labels' not found in {file_path}")
@@ -31,7 +31,7 @@ def display_frame_labels(file_path):
 
 def process_nc_file(file_path, base_output_dir, time_step=0, component_index=0):
     """
-    Process a single .nc file to extract the 'WIDTH' variable and save it as an image
+    Process a single .nc file to extract the 'VEL' variable and save it as an image
     with a directory structure based on the label.
     """
     try:
@@ -46,21 +46,21 @@ def process_nc_file(file_path, base_output_dir, time_step=0, component_index=0):
         # Convert frame labels to a string representation (e.g., "0101")
         label_str = ''.join(str(int(label)) for label in frame_labels)
         
-        # Check if 'WIDTH' is present in the variables
-        if 'WIDTH' not in nc_data.variables:
-            print(f"Variable 'WIDTH' not found in {file_path}")
+        # Check if 'VEL' is present in the variables
+        if 'VEL' not in nc_data.variables:
+            print(f"Variable 'VEL' not found in {file_path}")
             return
         
-        # Extract the WIDTH variable
-        WIDTH_data = nc_data.variables['WIDTH'][:]
+        # Extract the VEL variable
+        VEL_data = nc_data.variables['VEL'][:]
         
-        # Check the shape of WIDTH (should be 4D with the last dimension of size 2)
-        if WIDTH_data.ndim != 4 or WIDTH_data.shape[-1] != 2:
-            print(f"Unsupported data shape for 'WIDTH' in {file_path}: {WIDTH_data.shape}")
+        # Check the shape of VEL (should be 4D with the last dimension of size 2)
+        if VEL_data.ndim != 4 or VEL_data.shape[-1] != 2:
+            print(f"Unsupported data shape for 'VEL' in {file_path}: {VEL_data.shape}")
             return
         
         # Extract a 2D slice (time step and component)
-        image_data = WIDTH_data[time_step, :, :, component_index]
+        image_data = VEL_data[time_step, :, :, component_index]
         
         # Create the output directory based on the label
         output_dir = os.path.join(base_output_dir, label_str)
@@ -71,18 +71,19 @@ def process_nc_file(file_path, base_output_dir, time_step=0, component_index=0):
         output_path = os.path.join(output_dir, filename)
         
         # Plot the image
-        plt.figure(figsize=(4, 4))
+        plt.figure(figsize=(5, 5))
         plt.imshow(
             image_data,
-            cmap='viridis',  # Color map
+            cmap='bwr',  # Color map
             origin='lower',   # Flip vertically if needed
             aspect='auto'     # Maintain aspect ratio
         )
-        #plt.colorbar(label='WIDTH')
-        #plt.title(f'WIDTH - Label: {label_str}')
+        #plt.colorbar(label='VEL')
+        #plt.title(f'VEL - Label: {label_str}')
         #plt.xlabel("X-axis")
         #plt.ylabel("Y-axis")
-        plt.savefig(output_path, bbox_inches='tight', dpi=600)
+        plt.axis('off')
+        plt.savefig(output_path, bbox_inches='tight', dpi=240)
         plt.close()
         
         print(f"Saved image: {output_path}")
@@ -95,10 +96,7 @@ def process_nc_file(file_path, base_output_dir, time_step=0, component_index=0):
 
 
 def select_random_files(root_dir, category):
-    """
-    Select 25% of the available .nc files from a given category ('Test' or 'Train')
-    within subdirectories labeled '2013'.
-    """
+
     files_list = []
     
     for subdir, _, files in os.walk(root_dir):
@@ -107,8 +105,8 @@ def select_random_files(root_dir, category):
                 if file.endswith('.nc'):
                     files_list.append(os.path.join(subdir, file))
     
-    # Randomly select 10% of the files
-    selected_count = max(1, len(files_list) // 4)
+    # Randomly select 25% of the files
+    selected_count = max(1, len(files_list)) #add // number to get a percentage of the total data
     print(f"Selecting {selected_count} files out of {len(files_list)} for category '{category}'")
     selected_files = random.sample(files_list, selected_count) if files_list else []
     
