@@ -81,7 +81,7 @@ def select_random_files(root_dir, category):
     files_list = []
     
     for subdir, _, files in os.walk(root_dir):
-        if category in subdir and '2013' in subdir:
+        if category in subdir and '2014' in subdir:
             for file in files:
                 if file.endswith('.nc'):
                     files_list.append(os.path.join(subdir, file))
@@ -107,6 +107,6 @@ def process_directory(root_dir):
 
 
 # Directory containing the .nc files
-root_directory = "Tornet_Dataset"
+root_directory = "CSC606_Project\\Tornet_Dataset"
 
 process_directory(root_directory)

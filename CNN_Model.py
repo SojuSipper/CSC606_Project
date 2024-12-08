@@ -2,19 +2,23 @@ import sys
 import io
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.applications import VGG16
 from tensorflow.keras import layers, models
 import os
 import datetime
 import psutil
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
+from sklearn.utils.class_weight import compute_class_weight
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8') #for some reason I have to have this, I'd get a bunch of errors for some reason otherwise
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')  # Resolve encoding errors
 
 def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epochs=20,
-                 initial_learning_rate=0.01, dropout_rate=0.65, optimizer_type='adam', lr_decay_factor=0.95):
-    
+                 initial_learning_rate=0.01, dropout_rate=0.65, optimizer_type='adam', lr_decay_factor=0.95,
+                 class_weights=None):
+    base_model = VGG16(weights="imagenet", include_top=False, input_shape=image_size + (3,))
+    base_model.trainable = False
 
-    # Checks for GPU, if found use the GPU for the model, other wise use the CPU... (lmao have fun with this if you did not UNCOMMENT THE LAST COUPLE LINES MENTIONED IN THE CODE)
+    # Check for GPU availability
     physical_devices = tf.config.list_physical_devices('GPU')
     if physical_devices:
         print("Using GPU:", physical_devices)
@@ -46,6 +50,15 @@ def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epoc
     class_names = train_dataset.class_names
     print(f"Detected {num_classes} classes: {class_names}")
 
+    # Compute class weights if not provided
+    if class_weights is None:
+        all_labels = []
+        for _, labels in train_dataset:
+            all_labels.extend(labels.numpy())
+        class_weights = compute_class_weight('balanced', classes=np.arange(num_classes), y=all_labels)
+        class_weights = {i: weight for i, weight in enumerate(class_weights)}
+        print(f"Computed class weights: {class_weights}")
+
     normalization_layer = layers.Rescaling(1./255)
 
     data_augmentation = tf.keras.Sequential([
@@ -54,56 +67,26 @@ def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epoc
         layers.RandomZoom(0.1)
     ])
 
-    # Prepare datasets for better performance, found this online to help mitigate data balance (uses autotune from keras)
+    # Prepare datasets for better performance
     AUTOTUNE = tf.data.AUTOTUNE
-    train_dataset = train_dataset.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
-    test_dataset = test_dataset.cache().prefetch(buffer_size=AUTOTUNE)
+    train_dataset = train_dataset.map(lambda x, y: (normalization_layer(x), y)).cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
+    test_dataset = test_dataset.map(lambda x, y: (normalization_layer(x), y)).cache().prefetch(buffer_size=AUTOTUNE)
 
-    # Vgg-16 model 
+    # Build the model
     model = models.Sequential([
         data_augmentation,
         normalization_layer,
-
-        # 3x3 filter
-        layers.Conv2D(64, (3, 3), activation='relu', padding='same', input_shape=image_size + (3,)),
-        layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
-
-        #3x3 filter
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(128, (3, 3), activation='relu', padding='same'),
-        layers.Conv2D(128, (3, 3), activation='relu', padding='same'),
-
-        #3x3 filter
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(256, (3, 3), activation='relu', padding='same'),
-        layers.Conv2D(256, (3, 3), activation='relu', padding='same'),
-        layers.Conv2D(256, (3, 3), activation='relu', padding='same'),  
-
-        # 3x3 filter
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
-        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
-        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
-
-        #3x3 filter
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
-        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
-        layers.Conv2D(512, (3, 3), activation='relu', padding='same'),
-
-        layers.MaxPooling2D((2, 2)),
-
+        base_model,
         layers.Flatten(),
-        layers.Dense(4096, activation='relu'),
+        layers.Dense(64, activation='relu'),
         layers.Dropout(dropout_rate),
-        layers.Dense(4096, activation='relu'),
-        layers.Dropout(dropout_rate),
+        layers.Dense(32, activation='relu'),
         layers.Dense(num_classes, activation='softmax')
     ])
 
     model.build(input_shape=(None, image_size[0], image_size[1], 3))
 
-    # Choose optimizer either sgd or adam, couldnt be bothered to look into other ones :^) 
+    # Choose optimizer
     optimizer = tf.keras.optimizers.Adam(learning_rate=initial_learning_rate) if optimizer_type.lower() == 'adam' else \
                 tf.keras.optimizers.SGD(learning_rate=initial_learning_rate, momentum=0.9)
 
@@ -111,21 +94,20 @@ def vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=32, epoc
     
     model.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
-    # TensorBoard logging yoinked from one of my other classes 
+    # TensorBoard logging
     log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 
     model.summary()
 
-    # Train the model
-    model.fit(train_dataset, validation_data=test_dataset, epochs=epochs, callbacks=[tensorboard_callback, lr_scheduler], verbose=1)
+    # Train the model with class weights
+    model.fit(train_dataset, validation_data=test_dataset, epochs=epochs, callbacks=[tensorboard_callback, lr_scheduler], verbose=1, class_weight=class_weights)
 
     # Evaluate and display predictions
     evaluate_model(model, test_dataset, class_names)
     return model
 
 
-# had to get help with this online, I could not figure this out for the life of me
 def evaluate_model(model, test_dataset, class_names):
     print("\nEvaluating model on the test dataset...\n")
     
@@ -155,24 +137,18 @@ def evaluate_model(model, test_dataset, class_names):
     print(classification_report(all_labels, all_predictions, target_names=class_names))
 
 
-
-# Define directories CHANGE ME TO WHERE EVER YOU ARE STORING THE IMAGES SAVED FROM THE SCRIPT
+# Example usage
 train_dir = 'Tornet_Dataset_Images/Train'
 test_dir = 'Tornet_Dataset_Images/Test'
 
-# UNCOMMENT THE FOLLOWING until # ---***--- if you are only using a CPU in your model, otherwise you will bluescreen if you run the model for long. (takes up all threads / cores otherwise...)
+
+# COMMENT THE FOLLOWING until # ---***--- if you are only using a CPU in your model, otherwise you will bluescreen if you run the model for long. (takes up all threads / cores otherwise...)
+
 # Limit CPU usage to prevent bluescreening
-os.environ["OMP_NUM_THREADS"] = "12"
-os.environ["TF_NUM_INTRAOP_THREADS"] = "12"
-os.environ["TF_NUM_INTEROP_THREADS"] = "4"
-
-
 p = psutil.Process()
-p.cpu_affinity([1, 2, 3, 4, 5, 6, 7, 8])
+p.cpu_affinity([1, 2, 3, 4, 5, 6, 7, 8,9,10])
 p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
 
 # ---***---
 
-
-# Train and evaluate the model
-trained_model = vgg16_custom(train_dir, test_dir, image_size=(224, 224), batch_size=64, epochs=20)
+trained_model = vgg16_custom(train_dir, test_dir, image_size=(112, 112), batch_size=64, epochs=10)
