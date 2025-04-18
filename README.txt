@@ -1,6 +1,6 @@
 *********************************** WELCOME to the really cool and not under preforming model that is the TORGG-16 model ***********************************
 This model was developed for our CSC 606 class at USM and aims to predict what type of tornado is present in a given photo of cloud formations 
-    the dataset that we recommend if the tornet dataset from MIT/USA Airforce 
+    the dataset that we recommend is the tornet dataset from MIT/USA Airforce 
     which can be found here https://github.com/mit-ll/tornet (scroll down a little to "Downloading the Data" )
         * note you do not need to download the .csv for this model to work 
 
